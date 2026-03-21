@@ -1,40 +1,23 @@
-# FY Sell-In Data Product (Streamlit)
+# FY26 vs FY25 Dashboard
 
-This project was re-engineered from an R Shiny application into a Python-based Streamlit data product, enabling better scalability, simplified deployment, and alignment with modern data engineering and analytics workflows.
+This project is a Python-based Streamlit data product migrated from an R Shiny application. It provides a standardized and interactive way to analyze sell-in performance across fiscal years.
 
-## Overview
+## Dashboard Preview
 
-This application standardizes and automates sell-in performance analysis across fiscal years. It transforms raw transactional data into a reusable analytics layer with an interactive interface for business users.
+![Dashboard Screenshot](screenshot.png)
 
-## Problem Statement
+Note: The data shown in this screenshot is sample data for demonstration purposes only and does not represent actual business data.
 
-Sell-in analysis is often fragmented across Excel files and manual reporting processes, resulting in:
+---
 
-- Inconsistent data definitions
-- Limited visibility across fiscal periods
-- Time-consuming manual aggregation
-- Lack of scalable and reusable analytics tools
+## Files
 
-The original implementation in R Shiny faced limitations in deployment flexibility, dependency management, and integration with broader data workflows.
+- app.py
+- monthly_sellin.csv
+- requirements.txt
 
-## Solution
+---
 
-This project introduces a lightweight data product that:
+## How to run
 
-- Ingests structured CSV data
-- Applies standardized transformation logic
-- Generates consistent KPI outputs
-- Provides an interactive interface for business users
-
-The migration to Python + Streamlit improves portability and makes the solution easier to integrate with modern data stacks.
-
-## Core Capabilities
-
-- Monthly sell-in trend comparison across fiscal years
-- Automated variance calculation (period-over-period)
-- Brand-level aggregation and ranking
-- Volume share calculation
-- Structured output for downstream usage
-- Downloadable dataset for further analysis
-
-## Data Pipeline (Simplified)
+1. Install dependencies
