@@ -469,7 +469,7 @@ def show_comparison_charts(monthly, old_pub, new_pub):
         title="Monthly Projections Between Publishes",
         labels={"value": "in 9LC units", "calendar_month_abb": ""},
     )
-    st.plotly_chart(fig1, use_container_width=True)
+    st.plotly_chart(fig1, use_container_width=True, key="chart_1")
 
     fig2 = px.bar(
         monthly,
@@ -479,7 +479,7 @@ def show_comparison_charts(monthly, old_pub, new_pub):
         labels={"delta": "in 9LC units", "calendar_month_abb": ""},
     )
     fig2.update_traces(marker_color=["#22c55e" if v >= 0 else "#ef4444" for v in monthly["delta"]])
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, use_container_width=True, key="chart_2")
 
 
 st.title("Comparison between Sell IN RF Taiwan")
@@ -703,7 +703,7 @@ with main_tabs[1]:
 
             with subtabs[2]:
                 st.plotly_chart(line_chart(df_long, FY_ORDER, "Monthly Sell IN : FY24 to FY27"), use_container_width=True)
-                st.plotly_chart(quarterly_chart(df_long), use_container_width=True)
+                st.plotly_chart(quarterly_chart(df_long), use_container_width=True, key="chart_3")
 
             with subtabs[3]:
                 xcol = "period" if "period" in overview_df.columns else "calendar_month_abb"
@@ -714,7 +714,7 @@ with main_tabs[1]:
                     color="fiscal_year",
                     title="Sell IN by Month-Year",
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="chart_4")
 
             with subtabs[4]:
                 st.plotly_chart(line_chart(df_long, ["FY25", "FY26"], "Monthly Sell IN : FY26 vs FY25"), use_container_width=True)
