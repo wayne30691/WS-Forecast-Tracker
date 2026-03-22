@@ -484,7 +484,9 @@ def compare_publishes_cached(df, filters_normalized, old_pub, new_pub, date_rang
 
     old_m = old_df.groupby(["calendar_month_abb"], as_index=False)["Publish.Dimension"].sum().rename(columns={"Publish.Dimension": "old_value"})
     new_m = new_df.groupby(["calendar_month_abb"], as_index=False)["Publish.Dimension"].sum().rename(columns={"Publish.Dimension": "new_value"})
-    monthly = old_m.merge(new_m, on="calendar_month_abb", how="outer").fillna(0)
+    monthly = old_m.merge(new_m, on="calendar_month_abb", how="outer")
+    monthly["old_value"] = pd.to_numeric(monthly["old_value"], errors="coerce").fillna(0)
+    monthly["new_value"] = pd.to_numeric(monthly["new_value"], errors="coerce").fillna(0)
     monthly["delta"] = monthly["new_value"] - monthly["old_value"]
     monthly["calendar_month_abb"] = pd.Categorical(monthly["calendar_month_abb"], categories=MONTH_ORDER, ordered=True)
     monthly = monthly.sort_values("calendar_month_abb")
