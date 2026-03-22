@@ -1,4 +1,5 @@
 import io
+import hashlib
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -17,31 +18,46 @@ PUBLISH_ORDER = [
 ]
 
 
-def read_csv_any(uploaded):
-    if uploaded is None:
-        return None
+def _hash_bytes(b: bytes) -> str:
+    return hashlib.md5(b).hexdigest()
+
+
+@st.cache_data(show_spinner=False)
+def read_csv_cached(file_bytes: bytes, file_name: str) -> pd.DataFrame:
     try:
-        uploaded.seek(0)
-        return pd.read_csv(uploaded)
+        return pd.read_csv(io.BytesIO(file_bytes))
     except UnicodeDecodeError:
-        uploaded.seek(0)
-        return pd.read_csv(uploaded, encoding="latin1")
-    except Exception as e:
-        st.error(f"Failed to read file {uploaded.name}: {e}")
-        return None
+        return pd.read_csv(io.BytesIO(file_bytes), encoding="latin1")
+
+
+def load_uploaded_csv(uploaded_file, session_key: str):
+    if uploaded_file is not None:
+        try:
+            file_bytes = uploaded_file.getvalue()
+            df = read_csv_cached(file_bytes, uploaded_file.name)
+            st.session_state[session_key] = df
+            st.session_state[f"{session_key}_name"] = uploaded_file.name
+            st.session_state[f"{session_key}_hash"] = _hash_bytes(file_bytes)
+            return df
+        except Exception as e:
+            st.error(f"Failed to read file {uploaded_file.name}: {e}")
+            return None
+    return st.session_state.get(session_key)
 
 
 def normalize_text_cols(df, cols):
+    out = df.copy()
     for c in cols:
-        if c in df.columns:
-            df[c] = df[c].astype(str)
-    return df
+        if c in out.columns:
+            out[c] = out[c].astype(str)
+    return out
 
 
 def ensure_month_order(df, col="calendar_month_abb"):
-    if col in df.columns:
-        df[col] = pd.Categorical(df[col], categories=MONTH_ORDER, ordered=True)
-    return df
+    out = df.copy()
+    if col in out.columns:
+        out[col] = pd.Categorical(out[col], categories=MONTH_ORDER, ordered=True)
+    return out
 
 
 def safe_multiselect(label, options, default=None, key=None):
@@ -108,33 +124,47 @@ def get_publish_choices(df):
     return ordered + sorted(extra)
 
 
-def get_publish_series(df, publish_col):
-    if publish_col not in df.columns:
-        raise KeyError(f"Selected publish column '{publish_col}' is not present in Set_Up_All_RF_data.csv.")
-    return pd.to_numeric(df[publish_col], errors="coerce").fillna(0)
+def _normalize_filters_for_cache(filters: dict):
+    out = {}
+    for k, v in filters.items():
+        if v:
+            out[k] = tuple(sorted([str(x) for x in v]))
+        else:
+            out[k] = tuple()
+    return out
 
 
-def base_filtered_df(df, filters, publish_col, period_range=None, date_range=None):
+@st.cache_data(show_spinner=False)
+def get_filtered_df_cached(
+    df: pd.DataFrame,
+    filters_normalized: dict,
+    publish_col: str,
+    period_range,
+    date_range_tuple,
+):
     out = df.copy()
 
-    for col, vals in filters.items():
+    for col, vals in filters_normalized.items():
         if col in out.columns and vals:
-            out = out[out[col].astype(str).isin([str(v) for v in vals])]
+            out = out[out[col].astype(str).isin(vals)]
 
     if period_range and "fiscal_month" in out.columns:
         fm = pd.to_numeric(out["fiscal_month"], errors="coerce")
         out = out[(fm >= period_range[0]) & (fm <= period_range[1])]
 
-    if date_range and "period" in out.columns and len(date_range) == 2:
+    if date_range_tuple and "period" in out.columns and len(date_range_tuple) == 2:
         out["period"] = pd.to_datetime(out["period"], errors="coerce")
-        start_date = pd.to_datetime(date_range[0])
-        end_date = pd.to_datetime(date_range[1])
+        start_date = pd.to_datetime(date_range_tuple[0])
+        end_date = pd.to_datetime(date_range_tuple[1])
         out = out[(out["period"] >= start_date) & (out["period"] <= end_date)]
 
     if "fiscal_year" in out.columns:
         out = out[out["fiscal_year"].isin(FY_ORDER)]
 
-    out["Publish.Dimension"] = get_publish_series(out, publish_col)
+    if publish_col not in out.columns:
+        raise KeyError(f"Selected publish column '{publish_col}' is not present in Set_Up_All_RF_data.csv.")
+
+    out["Publish.Dimension"] = pd.to_numeric(out[publish_col], errors="coerce").fillna(0)
     return out
 
 
@@ -146,7 +176,8 @@ def add_dimension(df, dimension_col):
     return out
 
 
-def aggregate_overview(df, dimension_col, compare=("FY26", "FY25")):
+@st.cache_data(show_spinner=False)
+def aggregate_overview_cached(df: pd.DataFrame, dimension_col: str, left: str, right: str):
     df = add_dimension(df, dimension_col)
 
     value = df.groupby(["Dimension", "fiscal_year"], as_index=False)["Publish.Dimension"].sum()
@@ -158,7 +189,6 @@ def aggregate_overview(df, dimension_col, compare=("FY26", "FY25")):
 
     value = value[["Dimension"] + FY_ORDER].fillna(0)
 
-    left, right = compare
     value["delta"] = value[left] - value[right]
     denom = value[right].replace(0, np.nan)
     value["delta.pc"] = (value["delta"] / denom).replace([np.inf, -np.inf], np.nan).fillna(0)
@@ -206,7 +236,8 @@ def aggregate_overview(df, dimension_col, compare=("FY26", "FY25")):
     return out.sort_values(base, ascending=False)
 
 
-def monthly_fy_df(df):
+@st.cache_data(show_spinner=False)
+def monthly_fy_df_cached(df: pd.DataFrame):
     out = df.groupby(["calendar_month_abb", "fiscal_year"], as_index=False)["Publish.Dimension"].sum()
     out["calendar_month_abb"] = pd.Categorical(out["calendar_month_abb"], categories=MONTH_ORDER, ordered=True)
     out = out.sort_values("calendar_month_abb")
@@ -316,19 +347,30 @@ def sparkbar(series, width=110, height=28):
     return fig
 
 
+@st.cache_data(show_spinner=False)
+def dataframe_to_excel_bytes(df: pd.DataFrame) -> bytes:
+    bio = io.BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="data")
+    return bio.getvalue()
+
+
 def prepare_download(df, label):
-    bio = io.BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="data")
-    st.download_button(label, data=bio.getvalue(), file_name=f"{label.lower().replace(' ', '_')}.xlsx")
+    st.download_button(
+        label,
+        data=dataframe_to_excel_bytes(df),
+        file_name=f"{label.lower().replace(' ', '_')}.xlsx",
+    )
 
 
-def render_table_and_download(df, name):
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    bio = io.BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="data")
-    st.download_button("Download", data=bio.getvalue(), file_name=f"{name}.xlsx", key=name)
+def render_table_and_download(df, name, preview_rows=1000):
+    st.dataframe(df.head(preview_rows), use_container_width=True, hide_index=True)
+    st.download_button(
+        "Download",
+        data=dataframe_to_excel_bytes(df),
+        file_name=f"{name}.xlsx",
+        key=name,
+    )
 
 
 def styled_metric_table(df, compare_label="FY26 vs FY25", base_share="FY26.pc"):
@@ -367,7 +409,7 @@ def styled_metric_table(df, compare_label="FY26 vs FY25", base_share="FY26.pc"):
     for c in [col for col in fmt_df.columns if "(%)" in col or "Volume (%)" in col]:
         fmt_df[c] = fmt_df[c].map(fmt_pct)
 
-    st.dataframe(fmt_df, use_container_width=True, hide_index=True)
+    st.dataframe(fmt_df.head(1000), use_container_width=True, hide_index=True)
 
     with st.expander("Mini charts"):
         for _, row in df.head(15).iterrows():
@@ -384,9 +426,10 @@ def styled_metric_table(df, compare_label="FY26 vs FY25", base_share="FY26.pc"):
             c4.write(fmt_int(row.get("delta", 0)))
 
 
-def compare_publishes(df, filters, old_pub, new_pub, date_range, dimension_col):
-    old_df = base_filtered_df(df, filters, old_pub, date_range=date_range)
-    new_df = base_filtered_df(df, filters, new_pub, date_range=date_range)
+@st.cache_data(show_spinner=False)
+def compare_publishes_cached(df, filters_normalized, old_pub, new_pub, date_range_tuple, dimension_col):
+    old_df = get_filtered_df_cached(df, filters_normalized, old_pub, None, date_range_tuple)
+    new_df = get_filtered_df_cached(df, filters_normalized, new_pub, None, date_range_tuple)
 
     old_df = add_dimension(old_df, dimension_col)
     new_df = add_dimension(new_df, dimension_col)
@@ -449,26 +492,9 @@ with st.sidebar:
     allocation_file = st.file_uploader("Allocation_data.csv", type=["csv"], key="allocation_file")
     pi_file = st.file_uploader("Set_Up_PI_data.csv", type=["csv"], key="pi_file")
 
-if set_up_file is not None:
-    set_up_df = read_csv_any(set_up_file)
-    if set_up_df is not None:
-        st.session_state["set_up_df"] = set_up_df
-else:
-    set_up_df = st.session_state.get("set_up_df")
-
-if allocation_file is not None:
-    allocation_df = read_csv_any(allocation_file)
-    if allocation_df is not None:
-        st.session_state["allocation_df"] = allocation_df
-else:
-    allocation_df = st.session_state.get("allocation_df")
-
-if pi_file is not None:
-    pi_df = read_csv_any(pi_file)
-    if pi_df is not None:
-        st.session_state["pi_df"] = pi_df
-else:
-    pi_df = st.session_state.get("pi_df")
+set_up_df = load_uploaded_csv(set_up_file, "set_up_df")
+allocation_df = load_uploaded_csv(allocation_file, "allocation_df")
+pi_df = load_uploaded_csv(pi_file, "pi_df")
 
 if set_up_df is None:
     st.info("Upload Set_Up_All_RF_data.csv to use the converted app.")
@@ -477,16 +503,21 @@ if set_up_df is None:
 if not validate_main_file(set_up_df):
     st.stop()
 
-set_up_df = normalize_text_cols(set_up_df, ["brand", "brand_quality", "brand_quality_size", "pig_description", "pig_code", "higher_channel_lst", "customer_group_name"])
+set_up_df = normalize_text_cols(
+    set_up_df,
+    ["brand", "brand_quality", "brand_quality_size", "pig_description", "pig_code", "higher_channel_lst", "customer_group_name"]
+)
 set_up_df = ensure_month_order(set_up_df, "calendar_month_abb")
 
 if "period" in set_up_df.columns:
     set_up_df["period"] = pd.to_datetime(set_up_df["period"], errors="coerce")
 
 if allocation_df is not None and "qty_alloc" in allocation_df.columns:
+    allocation_df = allocation_df.copy()
     allocation_df["qty_alloc"] = pd.to_numeric(allocation_df["qty_alloc"], errors="coerce").fillna(0)
 
 if pi_df is not None and "period" in pi_df.columns:
+    pi_df = pi_df.copy()
     pi_df["period"] = pd.to_datetime(pi_df["period"], errors="coerce")
 
 with st.expander("Loaded file diagnostics"):
@@ -537,8 +568,13 @@ with st.sidebar:
         dmin = set_up_df["period"].min().date()
         dmax = set_up_df["period"].max().date()
         date_range = st.date_input("Date range", (dmin, dmax))
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            date_range_tuple = (str(date_range[0]), str(date_range[1]))
+        else:
+            date_range_tuple = None
     else:
         date_range = None
+        date_range_tuple = None
 
     threshold = st.date_input("Last 18 months threshold", pd.Timestamp("2024-07-01").date())
 
@@ -569,6 +605,16 @@ filters = {
     "customer_group_name": cgn_sel,
 }
 
+filters_normalized = _normalize_filters_for_cache(filters)
+
+filtered_df = get_filtered_df_cached(
+    set_up_df,
+    filters_normalized,
+    selected_publish,
+    period_range,
+    date_range_tuple,
+)
+
 main_tabs = st.tabs([
     "Raw Data",
     "Overview Market Demand",
@@ -582,15 +628,14 @@ with main_tabs[0]:
     raw_tabs = st.tabs(["Historical RF", "Allocations", "Opening Stocks FY26"])
 
     with raw_tabs[0]:
-        hist = base_filtered_df(set_up_df, filters, selected_publish, period_range=period_range, date_range=date_range)
-        st.dataframe(hist, use_container_width=True, hide_index=True)
+        st.dataframe(filtered_df.head(1000), use_container_width=True, hide_index=True)
 
     with raw_tabs[1]:
         if allocation_df is not None:
             ad = allocation_df.copy()
             if pig_code_sel and "pig_code" in ad.columns:
                 ad = ad[ad["pig_code"].astype(str).isin(pig_code_sel)]
-            st.dataframe(ad, use_container_width=True, hide_index=True)
+            st.dataframe(ad.head(1000), use_container_width=True, hide_index=True)
         else:
             st.info("Upload Allocation_data.csv to populate this tab.")
 
@@ -599,20 +644,37 @@ with main_tabs[0]:
             od = pi_df.copy()
             if pig_code_sel and "pig_code" in od.columns:
                 od = od[od["pig_code"].astype(str).isin(pig_code_sel)]
-            st.dataframe(od, use_container_width=True, hide_index=True)
+            st.dataframe(od.head(1000), use_container_width=True, hide_index=True)
         else:
             st.info("Upload Set_Up_PI_data.csv to populate this tab.")
 
 with main_tabs[1]:
-    overview_df = base_filtered_df(set_up_df, filters, selected_publish, period_range=period_range, date_range=date_range)
-    available_dims = [c for c in ["brand", "brand_quality", "brand_quality_size", "pig_description", "pig_code", "higher_channel_lst", "customer_groups_channel_lst", "customer_group_name"] if c in overview_df.columns]
+    overview_df = filtered_df
 
-    if not available_dims:
+    available_dims = [
+        c for c in [
+            "brand",
+            "brand_quality",
+            "brand_quality_size",
+            "pig_description",
+            "pig_code",
+            "higher_channel_lst",
+            "customer_groups_channel_lst",
+            "customer_group_name",
+        ]
+        if c in overview_df.columns
+    ]
+
+    if overview_df.empty:
+        st.warning("No data remains after applying the current filters.")
+    elif not available_dims:
         st.warning("No supported analysis dimension exists in the file.")
     else:
         analysis_dim = st.radio("Select Dimension", options=available_dims, horizontal=True)
-        ov = aggregate_overview(overview_df, analysis_dim, compare=("FY26", "FY25"))
-        ov_nfy = aggregate_overview(overview_df, analysis_dim, compare=("FY27", "FY26"))
+
+        ov = aggregate_overview_cached(overview_df, analysis_dim, "FY26", "FY25")
+        ov_nfy = aggregate_overview_cached(overview_df, analysis_dim, "FY27", "FY26")
+        df_long, df_wide = monthly_fy_df_cached(overview_df)
 
         k1, k2, k3, k4 = st.columns(4)
         with k1:
@@ -627,7 +689,6 @@ with main_tabs[1]:
             kpi_block("FY27 vs FY26 (%)", fmt_pct((ov["FY27"].sum() - ov["FY26"].sum()) / denom if denom else 0))
 
         c1, c2 = st.columns([4, 8])
-        df_long, df_wide = monthly_fy_df(overview_df)
 
         with c1:
             subtabs = st.tabs(["FY26 & FY25", "FY27 & FY26", "FY24 : FY27", "Month-Year", "FY26 vs FY25 | FY27 vs FY26"])
@@ -676,7 +737,7 @@ with main_tabs[1]:
 
             with table_tabs[2]:
                 if "pig_code" in overview_df.columns and "pig_description" in overview_df.columns:
-                    pig_df = aggregate_overview(overview_df, "pig_code", compare=("FY26", "FY25"))
+                    pig_df = aggregate_overview_cached(overview_df, "pig_code", "FY26", "FY25")
                     pig_desc = overview_df[["pig_code", "pig_description"]].dropna().drop_duplicates().astype(str)
                     pig_df = pig_df.merge(pig_desc, left_on="Dimension", right_on="pig_code", how="left")
                     pig_df = pig_df.rename(columns={"Dimension": "pig_code"})
@@ -686,19 +747,21 @@ with main_tabs[1]:
                         show[col] = show[col].map(fmt_int)
                     for col in ["FY26.pc", "delta.pc"]:
                         show[col] = show[col].map(fmt_pct)
-                    st.dataframe(show, use_container_width=True, hide_index=True)
+                    st.dataframe(show.head(1000), use_container_width=True, hide_index=True)
                 else:
                     st.info("Required columns for PIG code x Description are not available.")
 
 with main_tabs[2]:
-    compare_df = base_filtered_df(set_up_df, filters, selected_publish, date_range=date_range)
-    available_dims = [c for c in ["brand", "brand_quality", "brand_quality_size", "pig_description", "pig_code", "higher_channel_lst", "customer_groups_channel_lst", "customer_group_name"] if c in compare_df.columns]
+    available_dims = [
+        c for c in ["brand", "brand_quality", "brand_quality_size", "pig_description", "pig_code", "higher_channel_lst", "customer_groups_channel_lst", "customer_group_name"]
+        if c in set_up_df.columns
+    ]
 
     if not available_dims:
         st.warning("No supported comparison dimension exists in the file.")
     else:
         comparison_dim = st.radio("Select Comparison Dimension", options=available_dims, horizontal=True)
-        diff, monthly = compare_publishes(set_up_df, filters, old_publish, new_publish, date_range, comparison_dim)
+        diff, monthly = compare_publishes_cached(set_up_df, filters_normalized, old_publish, new_publish, date_range_tuple, comparison_dim)
 
         c1, c2 = st.columns([5, 7])
 
@@ -727,8 +790,8 @@ with main_tabs[2]:
 
             with tabs2[1]:
                 if require_cols(set_up_df, ["pig_code", "customer_group_name"], "Set_Up_All_RF_data.csv"):
-                    old_df = base_filtered_df(set_up_df, filters, old_publish, date_range=date_range)
-                    new_df = base_filtered_df(set_up_df, filters, new_publish, date_range=date_range)
+                    old_df = get_filtered_df_cached(set_up_df, filters_normalized, old_publish, None, date_range_tuple)
+                    new_df = get_filtered_df_cached(set_up_df, filters_normalized, new_publish, None, date_range_tuple)
 
                     old_g = old_df.groupby(["pig_code", "customer_group_name"], as_index=False)["Publish.Dimension"].sum().rename(columns={"Publish.Dimension": old_publish})
                     new_g = new_df.groupby(["pig_code", "customer_group_name"], as_index=False)["Publish.Dimension"].sum().rename(columns={"Publish.Dimension": new_publish})
@@ -740,8 +803,8 @@ with main_tabs[2]:
 
             with tabs2[2]:
                 if require_cols(set_up_df, ["pig_code", "pig_description"], "Set_Up_All_RF_data.csv"):
-                    old_df = base_filtered_df(set_up_df, filters, old_publish, date_range=date_range)
-                    new_df = base_filtered_df(set_up_df, filters, new_publish, date_range=date_range)
+                    old_df = get_filtered_df_cached(set_up_df, filters_normalized, old_publish, None, date_range_tuple)
+                    new_df = get_filtered_df_cached(set_up_df, filters_normalized, new_publish, None, date_range_tuple)
 
                     old_g = old_df.groupby(["pig_code", "pig_description"], as_index=False)["Publish.Dimension"].sum().rename(columns={"Publish.Dimension": old_publish})
                     new_g = new_df.groupby(["pig_code", "pig_description"], as_index=False)["Publish.Dimension"].sum().rename(columns={"Publish.Dimension": new_publish})
@@ -755,7 +818,7 @@ with main_tabs[3]:
     st.markdown("Regular check of items to be updated")
     st.caption("moving from Status New to Status Live if actual sales happened more than 18 months ago")
 
-    live_df = base_filtered_df(set_up_df, filters, selected_publish)
+    live_df = filtered_df
 
     if require_cols(live_df, ["sales_start_horizon_tag"], "Set_Up_All_RF_data.csv"):
         threshold_ts = pd.to_datetime(threshold)
@@ -775,7 +838,7 @@ with main_tabs[4]:
     st.markdown("Overview Total Sell IN Forecasts")
     st.caption("by Central Status")
 
-    chk = base_filtered_df(set_up_df, filters, selected_publish, date_range=date_range)
+    chk = filtered_df
     status_col = next((c for c in ["stock_tag", "ending_FY_tag", "sales_start_horizon_tag", "allocation_tag"] if c in chk.columns), None)
 
     if status_col:
@@ -795,7 +858,7 @@ with main_tabs[4]:
         st.info("No central status field found in the dataset.")
 
 with main_tabs[5]:
-    hl = base_filtered_df(set_up_df, filters, selected_publish, date_range=date_range)
+    hl = filtered_df
 
     if require_cols(hl, ["higher_channel_lst"], "Set_Up_All_RF_data.csv"):
         total = hl.groupby("higher_channel_lst", as_index=False)["Publish.Dimension"].sum().rename(columns={"Publish.Dimension": "Total Sell IN"})
