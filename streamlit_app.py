@@ -349,6 +349,7 @@ def sparkbar(series, width=110, height=28):
 
 @st.cache_data(show_spinner=False)
 def dataframe_to_download_bytes(df: pd.DataFrame, preferred_format: str = "xlsx"):
+    df = ensure_unique_columns(df)
     if preferred_format == "xlsx":
         try:
             import openpyxl  # noqa: F401
@@ -370,6 +371,26 @@ def dataframe_to_download_bytes(df: pd.DataFrame, preferred_format: str = "xlsx"
     return csv_bytes, "text/csv", "csv"
 
 
+def ensure_unique_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    cols = [str(c) for c in out.columns]
+    seen = {}
+    new_cols = []
+    for c in cols:
+        if c not in seen:
+            seen[c] = 0
+            new_cols.append(c)
+        else:
+            seen[c] += 1
+            new_cols.append(f"{c}_{seen[c]}")
+    out.columns = new_cols
+    return out
+
+
+def safe_dataframe(df: pd.DataFrame, **kwargs):
+    safe_dataframe(ensure_unique_columns(df), **kwargs)
+
+
 def prepare_download(df, label):
     data, mime, ext = dataframe_to_download_bytes(df, "xlsx")
     st.download_button(
@@ -382,7 +403,7 @@ def prepare_download(df, label):
 
 
 def render_table_and_download(df, name, preview_rows=1000):
-    st.dataframe(df.head(preview_rows), use_container_width=True, hide_index=True)
+    safe_dataframe(df.head(preview_rows), use_container_width=True, hide_index=True)
     data, mime, ext = dataframe_to_download_bytes(df, "xlsx")
     st.download_button(
         "Download",
@@ -429,7 +450,7 @@ def styled_metric_table(df, compare_label="FY26 vs FY25", base_share="FY26.pc"):
     for c in [col for col in fmt_df.columns if "(%)" in col or "Volume (%)" in col]:
         fmt_df[c] = fmt_df[c].map(fmt_pct)
 
-    st.dataframe(fmt_df.head(1000), use_container_width=True, hide_index=True)
+    safe_dataframe(fmt_df.head(1000), use_container_width=True, hide_index=True)
 
     with st.expander("Mini charts"):
         for idx, (_, row) in enumerate(df.head(15).iterrows()):
@@ -648,14 +669,14 @@ with main_tabs[0]:
     raw_tabs = st.tabs(["Historical RF", "Allocations", "Opening Stocks FY26"])
 
     with raw_tabs[0]:
-        st.dataframe(filtered_df.head(1000), use_container_width=True, hide_index=True)
+        safe_dataframe(filtered_df.head(1000), use_container_width=True, hide_index=True)
 
     with raw_tabs[1]:
         if allocation_df is not None:
             ad = allocation_df.copy()
             if pig_code_sel and "pig_code" in ad.columns:
                 ad = ad[ad["pig_code"].astype(str).isin(pig_code_sel)]
-            st.dataframe(ad.head(1000), use_container_width=True, hide_index=True)
+            safe_dataframe(ad.head(1000), use_container_width=True, hide_index=True)
         else:
             st.info("Upload Allocation_data.csv to populate this tab.")
 
@@ -664,7 +685,7 @@ with main_tabs[0]:
             od = pi_df.copy()
             if pig_code_sel and "pig_code" in od.columns:
                 od = od[od["pig_code"].astype(str).isin(pig_code_sel)]
-            st.dataframe(od.head(1000), use_container_width=True, hide_index=True)
+            safe_dataframe(od.head(1000), use_container_width=True, hide_index=True)
         else:
             st.info("Upload Set_Up_PI_data.csv to populate this tab.")
 
@@ -767,7 +788,7 @@ with main_tabs[1]:
                         show[col] = show[col].map(fmt_int)
                     for col in ["FY26.pc", "delta.pc"]:
                         show[col] = show[col].map(fmt_pct)
-                    st.dataframe(show.head(1000), use_container_width=True, hide_index=True)
+                    safe_dataframe(show.head(1000), use_container_width=True, hide_index=True)
                 else:
                     st.info("Required columns for PIG code x Description are not available.")
 
@@ -864,7 +885,7 @@ with main_tabs[4]:
     if status_col:
         overview = chk.groupby(status_col, as_index=False)["Publish.Dimension"].sum().rename(columns={"Publish.Dimension": "sell_in"})
         overview["sell_in"] = overview["sell_in"].map(fmt_int)
-        st.dataframe(overview, use_container_width=True, hide_index=True)
+        safe_dataframe(overview, use_container_width=True, hide_index=True)
 
         inactive = chk[chk[status_col].astype(str).str.lower().isin(["dead", "delisted"])] if status_col else chk.iloc[0:0]
 
@@ -885,7 +906,7 @@ with main_tabs[5]:
         total["Total Sell IN"] = total["Total Sell IN"].map(fmt_int)
 
         st.markdown("Total Sell IN Forecasts per High Level Channels")
-        st.dataframe(total, use_container_width=True, hide_index=True)
+        safe_dataframe(total, use_container_width=True, hide_index=True)
 
         monthly = hl.groupby(["higher_channel_lst", "calendar_month_abb"], as_index=False)["Publish.Dimension"].sum()
         wide = monthly.pivot(index="higher_channel_lst", columns="calendar_month_abb", values="Publish.Dimension").reset_index()
