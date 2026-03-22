@@ -412,17 +412,17 @@ def styled_metric_table(df, compare_label="FY26 vs FY25", base_share="FY26.pc"):
     st.dataframe(fmt_df.head(1000), use_container_width=True, hide_index=True)
 
     with st.expander("Mini charts"):
-        for _, row in df.head(15).iterrows():
+        for idx, row in df.head(15).iterrows():
             c1, c2, c3, c4 = st.columns([2.8, 1.2, 1.2, 1.2])
             c1.write(str(row["Dimension"]))
             with c2:
                 fig = sparkline(row.get("Quantity", []))
                 if fig is not None:
-                    st.plotly_chart(fig, use_container_width=False, config={"displayModeBar": False})
+                    st.plotly_chart(fig, use_container_width=False, config={"displayModeBar": False}, key=f"mini_chart_{idx}_line")
             with c3:
                 fig = sparkbar(row.get("FY.Monthly.Variation.Quantity", []))
                 if fig is not None:
-                    st.plotly_chart(fig, use_container_width=False, config={"displayModeBar": False})
+                    st.plotly_chart(fig, use_container_width=False, config={"displayModeBar": False}, key=f"mini_chart_{idx}_bar")
             c4.write(fmt_int(row.get("delta", 0)))
 
 
@@ -469,7 +469,7 @@ def show_comparison_charts(monthly, old_pub, new_pub):
         title="Monthly Projections Between Publishes",
         labels={"value": "in 9LC units", "calendar_month_abb": ""},
     )
-    st.plotly_chart(fig1, use_container_width=True, key="chart_1")
+    st.plotly_chart(fig1, use_container_width=True, key=f"publish_compare_line_{old_pub}_{new_pub}")
 
     fig2 = px.bar(
         monthly,
@@ -479,7 +479,7 @@ def show_comparison_charts(monthly, old_pub, new_pub):
         labels={"delta": "in 9LC units", "calendar_month_abb": ""},
     )
     fig2.update_traces(marker_color=["#22c55e" if v >= 0 else "#ef4444" for v in monthly["delta"]])
-    st.plotly_chart(fig2, use_container_width=True, key="chart_2")
+    st.plotly_chart(fig2, use_container_width=True, key=f"publish_compare_bar_{old_pub}_{new_pub}")
 
 
 st.title("Comparison between Sell IN RF Taiwan")
@@ -694,16 +694,16 @@ with main_tabs[1]:
             subtabs = st.tabs(["FY26 & FY25", "FY27 & FY26", "FY24 : FY27", "Month-Year", "FY26 vs FY25 | FY27 vs FY26"])
 
             with subtabs[0]:
-                st.plotly_chart(line_chart(df_long, ["FY25", "FY26"], "Monthly Sell IN : FY26 vs FY25"), use_container_width=True)
-                st.plotly_chart(variation_bar(df_wide, "FY26", "FY25", "Month Sell IN Variations : FY26 vs FY25"), use_container_width=True)
+                st.plotly_chart(line_chart(df_long, ["FY25", "FY26"], "Monthly Sell IN : FY26 vs FY25"), use_container_width=True, key="overview_fy26_vs_fy25_line")
+                st.plotly_chart(variation_bar(df_wide, "FY26", "FY25", "Month Sell IN Variations : FY26 vs FY25"), use_container_width=True, key="overview_fy26_vs_fy25_variation")
 
             with subtabs[1]:
-                st.plotly_chart(line_chart(df_long, ["FY26", "FY27"], "Monthly Sell IN : FY27 vs FY26"), use_container_width=True)
-                st.plotly_chart(variation_bar(df_wide, "FY27", "FY26", "Month Sell IN Variations : FY27 vs FY26"), use_container_width=True)
+                st.plotly_chart(line_chart(df_long, ["FY26", "FY27"], "Monthly Sell IN : FY27 vs FY26"), use_container_width=True, key="overview_fy27_vs_fy26_line")
+                st.plotly_chart(variation_bar(df_wide, "FY27", "FY26", "Month Sell IN Variations : FY27 vs FY26"), use_container_width=True, key="overview_fy27_vs_fy26_variation")
 
             with subtabs[2]:
-                st.plotly_chart(line_chart(df_long, FY_ORDER, "Monthly Sell IN : FY24 to FY27"), use_container_width=True)
-                st.plotly_chart(quarterly_chart(df_long), use_container_width=True, key="chart_3")
+                st.plotly_chart(line_chart(df_long, FY_ORDER, "Monthly Sell IN : FY24 to FY27"), use_container_width=True, key="overview_fy24_to_fy27_line")
+                st.plotly_chart(quarterly_chart(df_long), use_container_width=True, key="overview_quarterly_chart")
 
             with subtabs[3]:
                 xcol = "period" if "period" in overview_df.columns else "calendar_month_abb"
@@ -714,11 +714,11 @@ with main_tabs[1]:
                     color="fiscal_year",
                     title="Sell IN by Month-Year",
                 )
-                st.plotly_chart(fig, use_container_width=True, key="chart_4")
+                st.plotly_chart(fig, use_container_width=True, key="overview_month_year_line")
 
             with subtabs[4]:
-                st.plotly_chart(line_chart(df_long, ["FY25", "FY26"], "Monthly Sell IN : FY26 vs FY25"), use_container_width=True)
-                st.plotly_chart(line_chart(df_long, ["FY26", "FY27"], "Monthly Sell IN : FY27 vs FY26"), use_container_width=True)
+                st.plotly_chart(line_chart(df_long, ["FY25", "FY26"], "Monthly Sell IN : FY26 vs FY25"), use_container_width=True, key="overview_comparetab_fy26_vs_fy25_line")
+                st.plotly_chart(line_chart(df_long, ["FY26", "FY27"], "Monthly Sell IN : FY27 vs FY26"), use_container_width=True, key="overview_comparetab_fy27_vs_fy26_line")
 
         with c2:
             table_tabs = st.tabs(["FY26 vs FY25", "FY27 vs FY26", "FY26 vs FY25 | PIG code x Description"])
