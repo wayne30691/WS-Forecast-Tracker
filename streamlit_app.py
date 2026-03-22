@@ -388,7 +388,7 @@ def ensure_unique_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def safe_dataframe(df: pd.DataFrame, **kwargs):
-    safe_dataframe(ensure_unique_columns(df), **kwargs)
+    st.dataframe(ensure_unique_columns(df), **kwargs)
 
 
 def prepare_download(df, label):
